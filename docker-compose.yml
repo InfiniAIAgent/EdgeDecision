@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    container_name: edgedecision-db
+    environment:
+      POSTGRES_DB: edgedecision
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7
+    container_name: edgedecision-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: edgedecision-backend
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://postgres:postgres123@postgres:5432/edgedecision
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev-secret-change-in-production-abc123xyz
+      CORS_ORIGIN: http://localhost:3000
+      
+      # Add your API keys here (REQUIRED)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      SHOPIFY_API_KEY: ${SHOPIFY_API_KEY:-}
+      SHOPIFY_API_SECRET: ${SHOPIFY_API_SECRET:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_placeholder}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-pk_test_placeholder}
+      
+      # Optional - Add when you have them
+      FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
+      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
+      GOOGLE_ADS_CLIENT_ID: ${GOOGLE_ADS_CLIENT_ID:-}
+      KLAVIYO_API_KEY: ${KLAVIYO_API_KEY:-}
+      
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c "sleep 5 && npm run migrate && npm run dev"
+
+  # Frontend React App
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: edgedecision-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:3001/api
+      REACT_APP_WS_URL: http://localhost:3001
+      REACT_APP_STRIPE_PK: ${STRIPE_PUBLISHABLE_KEY:-pk_test_placeholder}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    stdin_open: true
+    tty: true
+
+volumes:
+  postgres_data:
+  redis_data:
